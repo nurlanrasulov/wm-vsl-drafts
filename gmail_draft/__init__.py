@@ -1,0 +1,1 @@
+"""Gmail draft automation package."""
