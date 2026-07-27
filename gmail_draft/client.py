@@ -221,6 +221,50 @@ def _decode_raw_message_bytes(raw: str) -> bytes:
     return _decode_raw(raw)
 
 
+def _remove_analytics_quote_header(msg) -> None:
+    """Remove Gmail 'On …, no-reply.analytics@wolt.com wrote:' reply header."""
+    email_pattern = re.escape(EXCLUDED_RECIPIENT)
+    html_patterns = [
+        re.compile(
+            rf'<div[^>]*class="[^"]*gmail_attr[^"]*"[^>]*>\s*'
+            rf"On .+?, {email_pattern} wrote:\s*</div>\s*",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        re.compile(
+            rf"On .+?, {email_pattern} wrote:\s*(?:<br\s*/?>)?\s*",
+            re.IGNORECASE,
+        ),
+    ]
+    text_pattern = re.compile(
+        rf"^On .+?, {email_pattern} wrote:\s*\n?",
+        re.IGNORECASE | re.MULTILINE,
+    )
+
+    for part in msg.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        content_type = part.get_content_type()
+        charset = part.get_content_charset() or "utf-8"
+        if content_type == "text/html":
+            html = part.get_content()
+            if not isinstance(html, str) or EXCLUDED_RECIPIENT.casefold() not in html.casefold():
+                continue
+            cleaned = html
+            for pattern in html_patterns:
+                cleaned = pattern.sub("", cleaned)
+            if cleaned == html:
+                continue
+            part.set_content(cleaned, subtype="html", charset=charset, cte="quoted-printable")
+        elif content_type == "text/plain":
+            text = part.get_content()
+            if not isinstance(text, str) or EXCLUDED_RECIPIENT.casefold() not in text.casefold():
+                continue
+            cleaned = text_pattern.sub("", text)
+            if cleaned == text:
+                continue
+            part.set_content(cleaned, subtype="plain", charset=charset, cte="quoted-printable")
+
+
 def _remove_looker_unsubscribe(msg, owner_email: str) -> None:
     """Remove Looker 'Click here to unsubscribe …' boilerplate from message bodies."""
     email_pattern = re.escape(owner_email.strip())
@@ -393,6 +437,7 @@ def _prepare_outbound_message(
             msg[header] = ", ".join(formataddr(pair) for pair in filtered)
 
     _fix_gmail_inline_images(msg)
+    _remove_analytics_quote_header(msg)
     _remove_looker_unsubscribe(msg, on_behalf_email)
     if add_signature:
         _append_on_behalf_signature(msg, name=on_behalf_name, email=on_behalf_email)
