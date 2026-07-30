@@ -65,15 +65,24 @@ def _write_query_from_existing(
     query: models.Query,
     *,
     filter_overrides: dict[str, str] | None = None,
+    field_additions: list[str] | None = None,
 ) -> str:
     merged_filters = _parse_filter_string(query.filters)
     if filter_overrides:
         merged_filters.update(filter_overrides)
 
+    fields = list(query.fields or [])
+    if field_additions:
+        existing = set(fields)
+        for field in field_additions:
+            if field not in existing:
+                fields.append(field)
+                existing.add(field)
+
     body = models.WriteQuery(
         model=query.model,
         view=query.view,
-        fields=query.fields,
+        fields=fields or None,
         pivots=query.pivots,
         fill_fields=query.fill_fields,
         filters=merged_filters or None,
@@ -194,13 +203,19 @@ def download_explore_xlsx(
     *,
     query_slug: str,
     filter_overrides: dict[str, str],
+    field_additions: list[str] | None = None,
 ) -> bytes:
     query = sdk.query_for_slug(query_slug, fields="id,model,view,fields,filters,sorts,limit")
     if not query:
         raise RuntimeError(f"Looker query slug not found: {query_slug}")
 
     resolved_overrides = _resolve_filter_overrides(query.filters, filter_overrides)
-    query_id = _write_query_from_existing(sdk, query, filter_overrides=resolved_overrides)
+    query_id = _write_query_from_existing(
+        sdk,
+        query,
+        filter_overrides=resolved_overrides,
+        field_additions=field_additions,
+    )
     return _run_query_xlsx(sdk, query_id)
 
 
