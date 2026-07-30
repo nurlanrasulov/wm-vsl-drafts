@@ -1,0 +1,38 @@
+name: Send shrink performance report
+
+on:
+  schedule:
+    # Monday 10:30 AM Baku (UTC+4) = 06:30 UTC
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  send-shrink-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send shrink report to category team
+        env:
+          LOOKERSDK_BASE_URL: ${{ secrets.LOOKERSDK_BASE_URL }}
+          LOOKERSDK_CLIENT_ID: ${{ secrets.LOOKERSDK_CLIENT_ID }}
+          LOOKERSDK_CLIENT_SECRET: ${{ secrets.LOOKERSDK_CLIENT_SECRET }}
+          LOOKERSDK_VERIFY_SSL: "true"
+          SHRINK_REPORT_QUERY_SLUG: ${{ secrets.SHRINK_REPORT_QUERY_SLUG }}
+          SHRINK_REPORT_RECIPIENT: ${{ secrets.SHRINK_REPORT_RECIPIENT }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_USE_TLS: "true"
+          ON_BEHALF_NAME: ${{ secrets.ON_BEHALF_NAME }}
+          ON_BEHALF_EMAIL: ${{ secrets.ON_BEHALF_EMAIL }}
+        run: python send_shrink_report.py
