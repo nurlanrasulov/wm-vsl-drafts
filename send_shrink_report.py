@@ -16,12 +16,15 @@ if str(ROOT) not in sys.path:
 from shrink_report.config import (  # noqa: E402
     DEFAULT_CATEGORY_COLUMN,
     DEFAULT_CONTRIBUTOR_COLUMN,
+    DEFAULT_GTIN_COLUMN,
     DEFAULT_ON_BEHALF_EMAIL,
     DEFAULT_ON_BEHALF_NAME,
     DEFAULT_RECIPIENT,
     DEFAULT_TOP_N,
     EXCLUDED_CATEGORIES,
     FILTER_OVERRIDES,
+    LOOKER_GTIN_FIELD,
+    OUTPUT_COLUMN_ORDER,
     email_body,
 )
 from shrink_report.excel_utils import format_shrink_report  # noqa: E402
@@ -123,6 +126,14 @@ def resolve_category_column() -> str:
     return os.environ.get("SHRINK_REPORT_CATEGORY_COLUMN", DEFAULT_CATEGORY_COLUMN)
 
 
+def resolve_gtin_column() -> str:
+    return os.environ.get("SHRINK_REPORT_GTIN_COLUMN", DEFAULT_GTIN_COLUMN)
+
+
+def resolve_looker_gtin_field() -> str:
+    return os.environ.get("SHRINK_REPORT_LOOKER_GTIN_FIELD", LOOKER_GTIN_FIELD)
+
+
 def resolve_top_n() -> int:
     raw = os.environ.get("SHRINK_REPORT_TOP_N", str(DEFAULT_TOP_N))
     try:
@@ -146,22 +157,26 @@ def generate_report(*, output_dir: Path, week_start: date) -> tuple[str, bytes]:
         sdk,
         query_slug=query_slug,
         filter_overrides=FILTER_OVERRIDES,
+        field_additions=[resolve_looker_gtin_field()],
     )
 
     contributor_column = resolve_contributor_column()
     category_column = resolve_category_column()
+    gtin_column = resolve_gtin_column()
     top_n = resolve_top_n()
 
     print(
         f"  Top {top_n} by {contributor_column!r} (descending), "
-        f"excluding {', '.join(EXCLUDED_CATEGORIES)}"
+        f"excluding {', '.join(EXCLUDED_CATEGORIES)}, including {gtin_column!r}"
     )
     xlsx_data = format_shrink_report(
         xlsx_raw,
         contributor_column=contributor_column,
         category_column=category_column,
+        gtin_column=gtin_column,
         excluded_categories=EXCLUDED_CATEGORIES,
         top_n=top_n,
+        output_column_order=OUTPUT_COLUMN_ORDER,
     )
     (output_dir / report_name).write_bytes(xlsx_data)
     print(f"  Saved {report_name}")
