@@ -20,18 +20,20 @@ from shrink_report.config import (  # noqa: E402
     DEFAULT_ON_BEHALF_EMAIL,
     DEFAULT_ON_BEHALF_NAME,
     DEFAULT_RECIPIENT,
+    DEFAULT_SOLD_UNITS_COLUMN,
     DEFAULT_TOP_N,
     EXCLUDED_CATEGORIES,
     FILTER_OVERRIDES,
     LOOKER_GTIN_FIELD,
+    LOOKER_SOLD_UNITS_FIELD,
     OUTPUT_COLUMN_ORDER,
     email_body,
 )
 from shrink_report.excel_utils import format_shrink_report  # noqa: E402
+from shrink_report.looker_query import download_shrink_xlsx  # noqa: E402
 from shrink_report.week_utils import last_week_start, parse_week_start, report_basename  # noqa: E402
 from vendor_report.email_utils import send_report_email  # noqa: E402
 from vendor_report.looker_client import (  # noqa: E402
-    download_explore_xlsx,
     init_sdk,
     validate_looker_connection,
 )
@@ -106,16 +108,9 @@ def resolve_week_start(args: argparse.Namespace) -> date:
     return last_week_start()
 
 
-def resolve_query_slug() -> str:
+def resolve_query_slug() -> str | None:
     slug = os.environ.get("SHRINK_REPORT_QUERY_SLUG", "").strip()
-    if not slug:
-        raise SystemExit(
-            "Missing Looker query slug.\n"
-            "Create a Looker explore for item-level 3-month shrinkage %, "
-            "then set SHRINK_REPORT_QUERY_SLUG in .env "
-            "(Share → Get link → slug after /x/)."
-        )
-    return slug
+    return slug or None
 
 
 def resolve_contributor_column() -> str:
@@ -130,8 +125,21 @@ def resolve_gtin_column() -> str:
     return os.environ.get("SHRINK_REPORT_GTIN_COLUMN", DEFAULT_GTIN_COLUMN)
 
 
-def resolve_looker_gtin_field() -> str:
-    return os.environ.get("SHRINK_REPORT_LOOKER_GTIN_FIELD", LOOKER_GTIN_FIELD)
+def resolve_sold_units_column() -> str:
+    return os.environ.get("SHRINK_REPORT_SOLD_UNITS_COLUMN", DEFAULT_SOLD_UNITS_COLUMN)
+
+
+def resolve_looker_field_additions() -> list[str]:
+    additions = [LOOKER_GTIN_FIELD, LOOKER_SOLD_UNITS_FIELD]
+    extra = os.environ.get("SHRINK_REPORT_LOOKER_FIELD_ADDITIONS", "")
+    additions.extend(field.strip() for field in extra.split(",") if field.strip())
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for field in additions:
+        if field not in seen:
+            deduped.append(field)
+            seen.add(field)
+    return deduped
 
 
 def resolve_top_n() -> int:
@@ -153,11 +161,11 @@ def generate_report(*, output_dir: Path, week_start: date) -> tuple[str, bytes]:
     query_slug = resolve_query_slug()
 
     print("\nDownloading shrink data from Looker...")
-    xlsx_raw = download_explore_xlsx(
+    xlsx_raw = download_shrink_xlsx(
         sdk,
         query_slug=query_slug,
         filter_overrides=FILTER_OVERRIDES,
-        field_additions=[resolve_looker_gtin_field()],
+        field_additions=resolve_looker_field_additions() if query_slug else None,
     )
 
     contributor_column = resolve_contributor_column()
