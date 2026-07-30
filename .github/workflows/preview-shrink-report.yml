@@ -1,0 +1,63 @@
+name: Preview shrink report
+
+on:
+  workflow_dispatch:
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check Snowflake auth
+        id: auth
+        continue-on-error: true
+        env:
+          SHRINK_DATA_SOURCE: snowflake
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_METRICS_TABLE: ${{ secrets.SNOWFLAKE_METRICS_TABLE }}
+          SNOWFLAKE_ITEMS_TABLE: ${{ secrets.SNOWFLAKE_ITEMS_TABLE }}
+        run: python send_shrink_report.py --check-auth
+
+      - name: Generate shrink report preview
+        if: steps.auth.outcome == 'success'
+        env:
+          SHRINK_DATA_SOURCE: snowflake
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_METRICS_TABLE: ${{ secrets.SNOWFLAKE_METRICS_TABLE }}
+          SNOWFLAKE_ITEMS_TABLE: ${{ secrets.SNOWFLAKE_ITEMS_TABLE }}
+        run: python preview_shrink_report.py
+
+      - name: Upload report artifact
+        if: steps.auth.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shrink-report-preview
+          path: output/shrink-reports/*.xlsx
+          if-no-files-found: error
+
+      - name: Report missing secrets
+        if: steps.auth.outcome != 'success'
+        run: |
+          echo "::warning::Snowflake auth failed. Add GitHub secrets:"
+          echo "  SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD, SNOWFLAKE_WAREHOUSE"
+          exit 1
