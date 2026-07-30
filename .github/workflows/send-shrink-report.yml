@@ -21,11 +21,16 @@ jobs:
 
       - name: Send shrink report to category team
         env:
-          LOOKERSDK_BASE_URL: ${{ secrets.LOOKERSDK_BASE_URL }}
-          LOOKERSDK_CLIENT_ID: ${{ secrets.LOOKERSDK_CLIENT_ID }}
-          LOOKERSDK_CLIENT_SECRET: ${{ secrets.LOOKERSDK_CLIENT_SECRET }}
-          LOOKERSDK_VERIFY_SSL: "true"
-          SHRINK_REPORT_QUERY_SLUG: ${{ secrets.SHRINK_REPORT_QUERY_SLUG }}
+          SHRINK_DATA_SOURCE: snowflake
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_METRICS_TABLE: ${{ secrets.SNOWFLAKE_METRICS_TABLE }}
+          SNOWFLAKE_ITEMS_TABLE: ${{ secrets.SNOWFLAKE_ITEMS_TABLE }}
           SHRINK_REPORT_RECIPIENT: ${{ secrets.SHRINK_REPORT_RECIPIENT }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}

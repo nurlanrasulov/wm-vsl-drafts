@@ -29,14 +29,12 @@ from shrink_report.config import (  # noqa: E402
     OUTPUT_COLUMN_ORDER,
     email_body,
 )
+from shrink_report.excel_builder import rows_to_xlsx  # noqa: E402
 from shrink_report.excel_utils import format_shrink_report  # noqa: E402
-from shrink_report.looker_query import download_shrink_xlsx  # noqa: E402
+from shrink_report.snowflake_client import validate_connection as validate_snowflake_connection  # noqa: E402
+from shrink_report.snowflake_query import fetch_shrink_rows  # noqa: E402
 from shrink_report.week_utils import last_week_start, parse_week_start, report_basename  # noqa: E402
 from vendor_report.email_utils import send_report_email  # noqa: E402
-from vendor_report.looker_client import (  # noqa: E402
-    init_sdk,
-    validate_looker_connection,
-)
 
 
 def load_dotenv() -> None:
@@ -56,7 +54,7 @@ def load_dotenv() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Download WM AZE shrink data from Looker, "
+            "Query WM AZE shrink data from Snowflake (default) or Looker, "
             "select top 10 biggest contributors by 3-month shrink value (Herbs and FnV excluded), "
             "and email the category team."
         )
@@ -78,6 +76,12 @@ def parse_args() -> argparse.Namespace:
         help="Directory to save generated files",
     )
     parser.add_argument(
+        "--data-source",
+        choices=("auto", "snowflake", "looker"),
+        default=os.environ.get("SHRINK_DATA_SOURCE", "auto"),
+        help="Data source: snowflake (default), looker, or auto",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Generate files but do not send email",
@@ -90,7 +94,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--check-auth",
         action="store_true",
-        help="Validate Looker API credentials and exit",
+        help="Validate data source credentials and exit",
     )
     return parser.parse_args()
 
@@ -106,6 +110,19 @@ def resolve_week_start(args: argparse.Namespace) -> date:
     if args.week_start:
         return parse_week_start(args.week_start)
     return last_week_start()
+
+
+def resolve_data_source(requested: str) -> str:
+    if requested in {"snowflake", "looker"}:
+        return requested
+
+    has_snowflake = bool(os.environ.get("SNOWFLAKE_PASSWORD") or os.environ.get("SNOWFLAKE_TOKEN"))
+    has_looker = bool(os.environ.get("LOOKERSDK_CLIENT_ID") and os.environ.get("LOOKERSDK_CLIENT_SECRET"))
+    if has_snowflake:
+        return "snowflake"
+    if has_looker:
+        return "looker"
+    return "snowflake"
 
 
 def resolve_query_slug() -> str | None:
@@ -150,23 +167,39 @@ def resolve_top_n() -> int:
         raise SystemExit(f"Invalid SHRINK_REPORT_TOP_N: {raw}") from exc
 
 
-def generate_report(*, output_dir: Path, week_start: date) -> tuple[str, bytes]:
-    output_dir.mkdir(parents=True, exist_ok=True)
+def download_raw_report(*, data_source: str) -> bytes:
+    if data_source == "snowflake":
+        headers, rows = fetch_shrink_rows()
+        print(f"  Retrieved {len(rows)} rows from Snowflake")
+        return rows_to_xlsx(headers, rows)
+
+    from shrink_report.looker_query import download_shrink_xlsx
+    from vendor_report.looker_client import init_sdk, validate_looker_connection
 
     sdk = init_sdk()
     me = validate_looker_connection(sdk)
     print(f"Looker connected as {me.get('display_name') or me.get('email')}")
-
-    report_name = f"{report_basename(week_start)}.xlsx"
-    query_slug = resolve_query_slug()
-
     print("\nDownloading shrink data from Looker...")
-    xlsx_raw = download_shrink_xlsx(
+    return download_shrink_xlsx(
         sdk,
-        query_slug=query_slug,
+        query_slug=resolve_query_slug(),
         filter_overrides=FILTER_OVERRIDES,
-        field_additions=resolve_looker_field_additions() if query_slug else None,
+        field_additions=resolve_looker_field_additions() if resolve_query_slug() else None,
     )
+
+
+def generate_report(*, output_dir: Path, week_start: date, data_source: str) -> tuple[str, bytes]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_name = f"{report_basename(week_start)}.xlsx"
+
+    if data_source == "snowflake":
+        info = validate_snowflake_connection()
+        print(
+            "Snowflake connected as "
+            f"{info['user']} @ {info['account']} (role={info['role'] or 'default'})"
+        )
+
+    xlsx_raw = download_raw_report(data_source=data_source)
 
     contributor_column = resolve_contributor_column()
     category_column = resolve_category_column()
@@ -175,7 +208,7 @@ def generate_report(*, output_dir: Path, week_start: date) -> tuple[str, bytes]:
 
     print(
         f"  Top {top_n} by {contributor_column!r} (descending), "
-        f"excluding {', '.join(EXCLUDED_CATEGORIES)}, including {gtin_column!r}"
+        f"excluding Herbs/FnV, including {gtin_column!r} and sold units"
     )
     xlsx_data = format_shrink_report(
         xlsx_raw,
@@ -195,8 +228,19 @@ def generate_report(*, output_dir: Path, week_start: date) -> tuple[str, bytes]:
 def main() -> None:
     load_dotenv()
     args = parse_args()
+    data_source = resolve_data_source(args.data_source)
 
     if args.check_auth:
+        if data_source == "snowflake":
+            info = validate_snowflake_connection()
+            print(
+                "Snowflake auth OK: "
+                f"{info['user']} @ {info['account']} (warehouse={info['warehouse'] or 'default'})"
+            )
+            return
+
+        from vendor_report.looker_client import init_sdk, validate_looker_connection
+
         sdk = init_sdk()
         me = validate_looker_connection(sdk)
         print(f"Looker auth OK: {me.get('email') or me.get('display_name')}")
@@ -206,11 +250,16 @@ def main() -> None:
     recipients = resolve_recipients(args)
     subject = report_basename(week_start)
 
+    print(f"Data source: {data_source}")
     print(f"Week start: {week_start.strftime('%d.%m.%Y')}")
     print(f"Subject: {subject}")
     print(f"Recipients: {', '.join(recipients)}")
 
-    attachment = generate_report(output_dir=args.output_dir, week_start=week_start)
+    attachment = generate_report(
+        output_dir=args.output_dir,
+        week_start=week_start,
+        data_source=data_source,
+    )
 
     if args.skip_email:
         print("\nSkipping email (--skip-email).")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate shrink report locally and print top 10 preview (requires Looker creds in .env)."""
+"""Generate shrink report from Snowflake and print top 10 preview."""
 
 from __future__ import annotations
 
@@ -14,13 +14,19 @@ if str(ROOT) not in sys.path:
 from openpyxl import load_workbook
 
 import send_shrink_report as report
+from shrink_report.week_utils import last_week_start
 
 
 def main() -> None:
     report.load_dotenv()
-    week_start = report.last_week_start()
+    data_source = report.resolve_data_source("auto")
+    week_start = last_week_start()
     output_dir = ROOT / "output" / "shrink-reports"
-    name, data = report.generate_report(output_dir=output_dir, week_start=week_start)
+    name, data = report.generate_report(
+        output_dir=output_dir,
+        week_start=week_start,
+        data_source=data_source,
+    )
 
     sheet = load_workbook(io.BytesIO(data)).active
     rows = [[cell.value for cell in row] for row in sheet.iter_rows()]
