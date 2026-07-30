@@ -5,10 +5,10 @@ from __future__ import annotations
 COUNTRY = "AZE"
 
 # Looker filter overrides keyed by filter field names from the saved explore.
-# Herbs are excluded via category filter; metrics use the last 3 months.
+# Herbs and FnV are excluded via category filter; metrics use the last 3 months.
 FILTER_OVERRIDES: dict[str, str] = {
     "country": COUNTRY,
-    "wolt_market_item.primary_category": "-Herbs",
+    "wolt_market_item.primary_category": "-Herbs,-Fruits & Vegetables",
     "wolt_market_item_metrics.shrinkage_date": "3 months",
 }
 
@@ -18,7 +18,15 @@ DEFAULT_CATEGORY_COLUMN = "Primary category"
 DEFAULT_TOP_N = 10
 DEFAULT_RECIPIENT = "wolt-market-aze-category@wolt.com"
 
-EXCLUDED_CATEGORIES = ("Herbs", "herbs", "HERBS")
+EXCLUDED_CATEGORIES = (
+    "Herbs",
+    "herbs",
+    "HERBS",
+    "Fruits & Vegetables",
+    "Fruits and Vegetables",
+    "FnV",
+    "F&V",
+)
 
 DEFAULT_ON_BEHALF_NAME = "Nurlan Rasulov"
 DEFAULT_ON_BEHALF_EMAIL = "nurlan.rasulov@wolt.com"
@@ -28,7 +36,7 @@ def email_body(*, name: str, email: str) -> str:
     return f"""Salam,
 
 Keçən 3 ay üzrə shrink-ə ən böyük töhfə verən top 10 məhsulun siyahısı əlavədədir.
-Herbs kateqoriyası hesabata daxil edilməyib.
+Herbs və Fruits & Vegetables (FnV) kateqoriyaları hesabata daxil edilməyib.
 
 Zəhmət olmasa, nəzərdən keçirin.
 

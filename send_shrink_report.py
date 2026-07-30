@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Download WM AZE shrink data from Looker, "
-            "select top 10 biggest contributors by 3-month shrink value (herbs excluded), "
+            "select top 10 biggest contributors by 3-month shrink value (Herbs and FnV excluded), "
             "and email the category team."
         )
     )
