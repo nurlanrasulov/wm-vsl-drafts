@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Detect best shrink performers (3M shrinkage %) and email the category team."""
+"""Email top 10 biggest shrink contributors (3M) to the category team every Monday."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ if str(ROOT) not in sys.path:
 
 from shrink_report.config import (  # noqa: E402
     DEFAULT_CATEGORY_COLUMN,
+    DEFAULT_CONTRIBUTOR_COLUMN,
     DEFAULT_ON_BEHALF_EMAIL,
     DEFAULT_ON_BEHALF_NAME,
     DEFAULT_RECIPIENT,
-    DEFAULT_SHRINKAGE_COLUMN,
     DEFAULT_TOP_N,
     EXCLUDED_CATEGORIES,
     FILTER_OVERRIDES,
@@ -51,8 +51,8 @@ def load_dotenv() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Download WM AZE shrink performance data from Looker, "
-            "rank best performers by 3-month shrinkage % (herbs excluded), "
+            "Download WM AZE shrink data from Looker, "
+            "select top 10 biggest contributors by 3-month shrink value (herbs excluded), "
             "and email the category team."
         )
     )
@@ -115,8 +115,8 @@ def resolve_query_slug() -> str:
     return slug
 
 
-def resolve_shrinkage_column() -> str:
-    return os.environ.get("SHRINK_REPORT_SHRINKAGE_COLUMN", DEFAULT_SHRINKAGE_COLUMN)
+def resolve_contributor_column() -> str:
+    return os.environ.get("SHRINK_REPORT_CONTRIBUTOR_COLUMN", DEFAULT_CONTRIBUTOR_COLUMN)
 
 
 def resolve_category_column() -> str:
@@ -141,24 +141,24 @@ def generate_report(*, output_dir: Path, week_start: date) -> tuple[str, bytes]:
     report_name = f"{report_basename(week_start)}.xlsx"
     query_slug = resolve_query_slug()
 
-    print("\nDownloading shrink performance data from Looker...")
+    print("\nDownloading shrink data from Looker...")
     xlsx_raw = download_explore_xlsx(
         sdk,
         query_slug=query_slug,
         filter_overrides=FILTER_OVERRIDES,
     )
 
-    shrinkage_column = resolve_shrinkage_column()
+    contributor_column = resolve_contributor_column()
     category_column = resolve_category_column()
     top_n = resolve_top_n()
 
     print(
-        f"  Ranking by {shrinkage_column!r} (ascending), "
-        f"excluding {', '.join(EXCLUDED_CATEGORIES)}, top {top_n or 'all'}"
+        f"  Top {top_n} by {contributor_column!r} (descending), "
+        f"excluding {', '.join(EXCLUDED_CATEGORIES)}"
     )
     xlsx_data = format_shrink_report(
         xlsx_raw,
-        shrinkage_column=shrinkage_column,
+        contributor_column=contributor_column,
         category_column=category_column,
         excluded_categories=EXCLUDED_CATEGORIES,
         top_n=top_n,

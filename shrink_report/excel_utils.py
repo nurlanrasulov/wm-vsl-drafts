@@ -1,4 +1,4 @@
-"""Excel post-processing for shrink performance reports."""
+"""Excel post-processing for shrink contributor reports."""
 
 from __future__ import annotations
 
@@ -12,25 +12,25 @@ from openpyxl.utils import get_column_letter
 def format_shrink_report(
     data: bytes,
     *,
-    shrinkage_column: str,
+    contributor_column: str,
     category_column: str,
     excluded_categories: tuple[str, ...],
-    top_n: int = 0,
+    top_n: int = 10,
 ) -> bytes:
     """
-    Exclude herbs, sort by shrinkage % ascending (best performers first),
-    and optionally keep only the top N rows.
+    Exclude herbs, sort by shrink contribution descending (biggest contributors first),
+    and keep only the top N rows.
     """
     workbook = load_workbook(io.BytesIO(data))
-    sheet = _find_sheet_with_column(workbook, shrinkage_column)
+    sheet = _find_sheet_with_column(workbook, contributor_column)
     if sheet is None:
-        raise RuntimeError(f'Column "{shrinkage_column}" not found in Excel export')
+        raise RuntimeError(f'Column "{contributor_column}" not found in Excel export')
 
     header_row = 1
-    shrink_col = _find_column_index(sheet, header_row, shrinkage_column)
-    if shrink_col is None:
+    contributor_col = _find_column_index(sheet, header_row, contributor_column)
+    if contributor_col is None:
         raise RuntimeError(
-            f'Column "{shrinkage_column}" not found in sheet "{sheet.title}"'
+            f'Column "{contributor_column}" not found in sheet "{sheet.title}"'
         )
 
     category_col = _find_column_index(sheet, header_row, category_column)
@@ -54,10 +54,10 @@ def format_shrink_report(
             if category_value is not None and str(category_value).strip().lower() in excluded:
                 continue
 
-        sort_key = _sort_key(row_values[shrink_col - 1])
+        sort_key = _sort_key(row_values[contributor_col - 1])
         rows.append((sort_key, row_values))
 
-    rows.sort(key=lambda item: item[0])
+    rows.sort(key=lambda item: item[0], reverse=True)
 
     if top_n > 0:
         rows = rows[:top_n]
@@ -65,7 +65,7 @@ def format_shrink_report(
     bold_font = Font(bold=True)
     for col in range(1, max_col + 1):
         sheet.cell(row=header_row, column=col).font = bold_font
-    sheet.cell(row=header_row, column=shrink_col).font = bold_font
+    sheet.cell(row=header_row, column=contributor_col).font = bold_font
 
     for offset, (_, row_values) in enumerate(rows, start=header_row + 1):
         for col in range(1, max_col + 1):
@@ -75,7 +75,7 @@ def format_shrink_report(
         for col in range(1, max_col + 1):
             sheet.cell(row=row_idx, column=col).value = None
 
-    _ = get_column_letter(shrink_col)
+    _ = get_column_letter(contributor_col)
 
     output = io.BytesIO()
     workbook.save(output)
@@ -103,11 +103,11 @@ def _find_column_index(sheet, header_row: int, column_name: str) -> int | None:
 
 def _sort_key(value) -> tuple:
     if value is None:
-        return (1, float("inf"))
+        return (1, float("-inf"))
     if isinstance(value, (int, float)):
         return (0, float(value))
-    text = str(value).strip().replace("%", "")
+    text = str(value).strip().replace("%", "").replace(",", "")
     try:
         return (0, float(text))
     except ValueError:
-        return (0, float("inf"))
+        return (0, float("-inf"))

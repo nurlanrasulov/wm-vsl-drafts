@@ -1,4 +1,4 @@
-"""Configuration for WM AZE shrink performance reports."""
+"""Configuration for WM AZE shrink contributor reports."""
 
 from __future__ import annotations
 
@@ -12,9 +12,10 @@ FILTER_OVERRIDES: dict[str, str] = {
     "wolt_market_item_metrics.shrinkage_date": "3 months",
 }
 
+DEFAULT_CONTRIBUTOR_COLUMN = "Shrink value (AZN)"
 DEFAULT_SHRINKAGE_COLUMN = "Shrinkage % (3M)"
 DEFAULT_CATEGORY_COLUMN = "Primary category"
-DEFAULT_TOP_N = 100
+DEFAULT_TOP_N = 10
 DEFAULT_RECIPIENT = "wolt-market-aze-category@wolt.com"
 
 EXCLUDED_CATEGORIES = ("Herbs", "herbs", "HERBS")
@@ -26,7 +27,7 @@ DEFAULT_ON_BEHALF_EMAIL = "nurlan.rasulov@wolt.com"
 def email_body(*, name: str, email: str) -> str:
     return f"""Salam,
 
-Keçən 3 ay üzrə shrink göstəricilərinə görə ən yaxşı performans göstərən məhsulların siyahısı əlavədədir.
+Keçən 3 ay üzrə shrink-ə ən böyük töhfə verən top 10 məhsulun siyahısı əlavədədir.
 Herbs kateqoriyası hesabata daxil edilməyib.
 
 Zəhmət olmasa, nəzərdən keçirin.
