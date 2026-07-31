@@ -3,21 +3,17 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from shrink_report.config import COUNTRY
-from shrink_report.snowflake_client import connect, execute_query
+from shrink_report.snowflake_client import connect
 
 DEFAULT_METRICS_TABLE = (
     "WOLT_MARKET.RETAIL_PLATFORMS.RETAIL_PLATFORM_INVENTORY_WAREHOUSE_PRODUCT_REPORTING_WM"
 )
+# Highest-scoring product dim from discovery (GTIN + name + category + country).
 DEFAULT_PRODUCTS_TABLE = (
-    "WOLT_MARKET.INTERMEDIATE.F_RETAIL_PLATFORM_VENDOR_PURCHASE_ORDER_ITEMS_WM"
-)
-FALLBACK_PRODUCTS_TABLES = (
-    "WOLT_MARKET.INTERMEDIATE.F_RETAIL_PLATFORM_INVENTORY_RECEIVING_WM",
-    "WOLT_MARKET.INTERMEDIATE.F_RETAIL_PLATFORM_VENDOR_DRAFT_PURCHASE_ORDER_ITEMS_WM",
-    "WOLT_MARKET.RETAIL_PLATFORMS.RETAIL_PLATFORM_STOCK_COUNT_PRODUCT_STATUS",
-    "WOLT_MARKET.INTERMEDIATE.F_RETAIL_PLATFORM_INVENTORY_AGGREGATED_EVENTS_WM",
+    "WOLT_MARKET.INTERMEDIATE.F_RETAIL_PLATFORM_VENDOR_DRAFT_PURCHASE_ORDER_ITEMS_WM"
 )
 
 
@@ -39,16 +35,18 @@ def _split_fqn(table: str) -> tuple[str, str, str]:
     return parts[0], parts[1], parts[2]
 
 
-def _table_columns(table: str) -> set[str]:
+def _table_columns(cursor, table: str) -> set[str]:
     database, schema, name = _split_fqn(table)
-    sql = f"""
-    SELECT column_name
-    FROM {database}.INFORMATION_SCHEMA.COLUMNS
-    WHERE table_schema = %(schema)s
-      AND table_name = %(name)s
-    """
-    _, rows = execute_query(sql, params={"schema": schema, "name": name})
-    return {str(row[0]).upper() for row in rows}
+    cursor.execute(
+        f"""
+        SELECT column_name
+        FROM {database}.INFORMATION_SCHEMA.COLUMNS
+        WHERE table_schema = %(schema)s
+          AND table_name = %(name)s
+        """,
+        {"schema": schema, "name": name},
+    )
+    return {str(row[0]).upper() for row in cursor.fetchall()}
 
 
 def _pick_column(columns: set[str], candidates: tuple[str, ...]) -> str | None:
@@ -56,43 +54,6 @@ def _pick_column(columns: set[str], candidates: tuple[str, ...]) -> str | None:
         if candidate.upper() in columns:
             return candidate
     return None
-
-
-def _pick_products_table() -> tuple[str, set[str]]:
-    configured = _products_table()
-    candidates = [configured, *[t for t in FALLBACK_PRODUCTS_TABLES if t != configured]]
-    best: tuple[str, set[str], int] | None = None
-    for table in candidates:
-        try:
-            cols = _table_columns(table)
-        except Exception as exc:
-            print(f"  Skipping {table}: {exc}")
-            continue
-        score = 0
-        if _pick_column(cols, ("PRODUCT_ID",)):
-            score += 10
-        if _pick_column(cols, ("GTIN", "EAN", "BARCODE", "EAN_CODE")):
-            score += 5
-        if _pick_column(cols, ("PRODUCT_NAME", "ITEM_NAME", "NAME")):
-            score += 3
-        if _pick_column(
-            cols,
-            (
-                "PRODUCT_FAMILY_NAME_LEVEL_1",
-                "PRIMARY_CATEGORY",
-                "CATEGORY_NAME",
-                "CATEGORY",
-            ),
-        ):
-            score += 4
-        if _pick_column(cols, ("VENUE_COUNTRY", "COUNTRY_CODE", "COUNTRY")):
-            score += 2
-        print(f"  Product table candidate {table}: score={score}")
-        if best is None or score > best[2]:
-            best = (table, cols, score)
-    if not best or best[2] < 10:
-        raise SystemExit("Could not find a usable product dimension table with PRODUCT_ID.")
-    return best[0], best[1]
 
 
 def build_shrink_sql(products_table: str, product_columns: set[str]) -> str:
@@ -181,10 +142,31 @@ LIMIT 5000
 """.strip()
 
 
-def fetch_shrink_rows() -> tuple[list[str], list[list]]:
+def fetch_shrink_rows() -> tuple[list[str], list[list[Any]]]:
+    """Run shrink report using a single Snowflake connection (one browser login)."""
+    metrics = _metrics_table()
+    products = _products_table()
     print("  Running Snowflake shrink query...")
-    print(f"  Metrics: {_metrics_table()}")
-    products_table, product_columns = _pick_products_table()
-    print(f"  Products: {products_table}")
-    sql = build_shrink_sql(products_table, product_columns)
-    return execute_query(sql, params={"country": COUNTRY})
+    print(f"  Metrics: {metrics}")
+    print(f"  Products: {products}")
+
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT CURRENT_USER(), CURRENT_ACCOUNT(), CURRENT_ROLE(), CURRENT_WAREHOUSE()"
+        )
+        user, account, role, warehouse = cursor.fetchone()
+        print(
+            f"  Snowflake connected as {user} @ {account} "
+            f"(role={role or 'default'}, warehouse={warehouse or 'default'})"
+        )
+
+        product_columns = _table_columns(cursor, products)
+        if "PRODUCT_ID" not in product_columns:
+            raise SystemExit(f"Product table {products} has no PRODUCT_ID column.")
+
+        sql = build_shrink_sql(products, product_columns)
+        cursor.execute(sql, {"country": COUNTRY})
+        headers = [column[0] for column in cursor.description]
+        rows = [list(row) for row in cursor.fetchall()]
+        return headers, rows

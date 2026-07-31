@@ -193,11 +193,7 @@ def generate_report(*, output_dir: Path, week_start: date, data_source: str) -> 
     report_name = f"{report_basename(week_start)}.xlsx"
 
     if data_source == "snowflake":
-        info = validate_snowflake_connection()
-        print(
-            "Snowflake connected as "
-            f"{info['user']} @ {info['account']} (role={info['role'] or 'default'})"
-        )
+        print("Using Snowflake data source")
 
     xlsx_raw = download_raw_report(data_source=data_source)
 
