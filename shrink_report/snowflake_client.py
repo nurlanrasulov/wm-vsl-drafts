@@ -31,26 +31,34 @@ def load_snowflake_config() -> dict[str, str | None]:
 
 def connect():
     config = load_snowflake_config()
-    missing = [key for key in ("account", "user", "password") if not config.get(key)]
+    authenticator = (os.environ.get("SNOWFLAKE_AUTHENTICATOR") or "").strip()
+    # Browser SSO does not need a PAT / password.
+    using_browser = authenticator.lower() in {"externalbrowser", "browser"}
+    required = ["account", "user"] if using_browser else ["account", "user", "password"]
+    missing = [key for key in required if not config.get(key)]
     if missing:
         raise SystemExit(
             "Missing Snowflake configuration:\n  "
             + ", ".join(f"SNOWFLAKE_{key.upper()}" for key in missing)
-            + "\nSet credentials in .env or Cursor Cloud secrets."
+            + "\nSet credentials in .env or Cursor Cloud secrets.\n"
+            "Tip: if PAT fails with network policy, set "
+            "SNOWFLAKE_AUTHENTICATOR=externalbrowser and log in via browser."
         )
 
     kwargs: dict[str, Any] = {
         "account": config["account"],
         "user": config["user"],
-        "password": config["password"],
-        "login_timeout": int(os.environ.get("SNOWFLAKE_LOGIN_TIMEOUT", "30")),
+        "login_timeout": int(os.environ.get("SNOWFLAKE_LOGIN_TIMEOUT", "60")),
         "network_timeout": int(os.environ.get("SNOWFLAKE_NETWORK_TIMEOUT", "120")),
     }
-    # PAT works as password. Only set authenticator when explicitly requested —
-    # PROGRAMMATIC_ACCESS_TOKEN can crash older connector versions with TypeError.
-    authenticator = os.environ.get("SNOWFLAKE_AUTHENTICATOR", "").strip()
-    if authenticator and authenticator.upper() not in {"", "PASSWORD", "PAT"}:
-        kwargs["authenticator"] = authenticator
+    if using_browser:
+        kwargs["authenticator"] = "externalbrowser"
+    elif config.get("password"):
+        kwargs["password"] = config["password"]
+        # Only set authenticator when explicitly requested —
+        # PROGRAMMATIC_ACCESS_TOKEN can crash older connector versions with TypeError.
+        if authenticator and authenticator.upper() not in {"", "PASSWORD", "PAT"}:
+            kwargs["authenticator"] = authenticator
     for key in ("warehouse", "database", "schema", "role"):
         value = config.get(key)
         if value:
@@ -60,7 +68,7 @@ def connect():
         return snowflake.connector.connect(**kwargs)
     except TypeError as exc:
         # Retry without authenticator for PAT-as-password flows.
-        if "authenticator" in kwargs:
+        if "authenticator" in kwargs and not using_browser:
             kwargs.pop("authenticator", None)
             try:
                 return snowflake.connector.connect(**kwargs)
@@ -75,8 +83,9 @@ def connect():
             hints.append("Your IP may be blocked by Snowflake network policy.")
         if "network policy is required" in message.lower():
             hints.append(
-                "Snowflake requires a network policy for PAT usage. "
-                "Run from an allowed network/VPN, or ask admin to attach a policy."
+                "PAT requires a Snowflake network policy. "
+                "Easiest fix: set SNOWFLAKE_AUTHENTICATOR=externalbrowser in .env "
+                "and run again (browser SSO login)."
             )
         if "programmatic access token is invalid" in message.lower():
             hints.append("Check SNOWFLAKE_USER matches the PAT owner, or generate a new PAT.")
