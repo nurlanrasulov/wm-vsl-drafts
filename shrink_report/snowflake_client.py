@@ -8,16 +8,24 @@ from typing import Any
 import snowflake.connector
 
 
+def _clean(value: str | None) -> str | None:
+    if value is None:
+        return None
+    # PATs can get line-wrapped when pasted into Terminal; remove all whitespace.
+    cleaned = "".join(value.split())
+    return cleaned or None
+
+
 def load_snowflake_config() -> dict[str, str | None]:
-    password = os.environ.get("SNOWFLAKE_PASSWORD") or os.environ.get("SNOWFLAKE_TOKEN")
+    password = _clean(os.environ.get("SNOWFLAKE_PASSWORD") or os.environ.get("SNOWFLAKE_TOKEN"))
     return {
-        "account": os.environ.get("SNOWFLAKE_ACCOUNT", "doordash"),
-        "user": os.environ.get("SNOWFLAKE_USER", "nurlan.rasulov@wolt.com"),
+        "account": _clean(os.environ.get("SNOWFLAKE_ACCOUNT", "doordash")),
+        "user": _clean(os.environ.get("SNOWFLAKE_USER", "nurlan.rasulov@wolt.com")),
         "password": password,
-        "warehouse": os.environ.get("SNOWFLAKE_WAREHOUSE"),
-        "database": os.environ.get("SNOWFLAKE_DATABASE"),
-        "schema": os.environ.get("SNOWFLAKE_SCHEMA"),
-        "role": os.environ.get("SNOWFLAKE_ROLE"),
+        "warehouse": _clean(os.environ.get("SNOWFLAKE_WAREHOUSE")),
+        "database": _clean(os.environ.get("SNOWFLAKE_DATABASE")),
+        "schema": _clean(os.environ.get("SNOWFLAKE_SCHEMA")),
+        "role": _clean(os.environ.get("SNOWFLAKE_ROLE")),
     }
 
 
@@ -65,7 +73,10 @@ def validate_connection() -> dict[str, str]:
         cursor.execute(
             "SELECT CURRENT_USER(), CURRENT_ACCOUNT(), CURRENT_ROLE(), CURRENT_WAREHOUSE()"
         )
-        user, account, role, warehouse = cursor.fetchone()
+        row = cursor.fetchone()
+        if not row:
+            raise SystemExit("Snowflake connected, but auth check returned no rows.")
+        user, account, role, warehouse = row
         return {
             "user": str(user),
             "account": str(account),
