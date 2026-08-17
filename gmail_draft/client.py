@@ -221,6 +221,84 @@ def _decode_raw_message_bytes(raw: str) -> bytes:
     return _decode_raw(raw)
 
 
+def _fetch_vacation_bodies(service) -> tuple[str, str]:
+    """Return (html, plain) vacation auto-reply bodies from Gmail settings."""
+    try:
+        vacation = service.users().settings().getVacation(userId="me").execute()
+    except Exception:
+        return "", ""
+    html = (vacation.get("responseBodyHtml") or "").strip()
+    plain = (vacation.get("responseBodyPlainText") or "").strip()
+    return html, plain
+
+
+def _collapse_html_whitespace(html: str) -> str:
+    return re.sub(r"\s+", " ", html).strip()
+
+
+def _remove_vacation_reply(msg, vacation_html: str = "", vacation_plain: str = "") -> None:
+    """Remove Gmail vacation auto-reply text if it appears in the draft body."""
+    html_patterns: list[re.Pattern[str]] = [
+        re.compile(
+            r"(?:<div[^>]*dir=\"ltr\"[^>]*>\s*)?"
+            r"(?:<p>\s*)?Hörmətli həmkarlar,\s*(?:</p>\s*)?"
+            r".*?məzuniyyətdə olacağam.*?"
+            r"(?:055-203-52-57|tural\.mehbaliyev@wolt\.com).*?"
+            r"(?:</p>\s*)?(?:<p>\s*<br>\s*</p>\s*)?(?:</div>)?",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ]
+    text_patterns: list[re.Pattern[str]] = [
+        re.compile(
+            r"Hörmətli həmkarlar,\s*"
+            r".*?məzuniyyətdə olacağam.*?"
+            r"(?:055-203-52-57|tural\.mehbaliyev@wolt\.com)\s*",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ]
+
+    if vacation_html:
+        html_patterns.insert(0, re.compile(re.escape(vacation_html), re.IGNORECASE | re.DOTALL))
+        collapsed = _collapse_html_whitespace(vacation_html)
+        if collapsed != vacation_html:
+            html_patterns.insert(1, re.compile(re.escape(collapsed), re.IGNORECASE | re.DOTALL))
+    if vacation_plain:
+        text_patterns.insert(0, re.compile(re.escape(vacation_plain), re.IGNORECASE | re.DOTALL))
+
+    for part in msg.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        content_type = part.get_content_type()
+        charset = part.get_content_charset() or "utf-8"
+        if content_type == "text/html":
+            html = part.get_content()
+            if not isinstance(html, str):
+                continue
+            cleaned = html
+            if vacation_html and vacation_html in cleaned:
+                cleaned = cleaned.replace(vacation_html, "")
+            collapsed_vacation = _collapse_html_whitespace(vacation_html) if vacation_html else ""
+            if collapsed_vacation and collapsed_vacation in cleaned:
+                cleaned = cleaned.replace(collapsed_vacation, "")
+            for pattern in html_patterns:
+                cleaned = pattern.sub("", cleaned)
+            if cleaned == html:
+                continue
+            part.set_content(cleaned, subtype="html", charset=charset, cte="quoted-printable")
+        elif content_type == "text/plain":
+            text = part.get_content()
+            if not isinstance(text, str):
+                continue
+            cleaned = text
+            if vacation_plain and vacation_plain in cleaned:
+                cleaned = cleaned.replace(vacation_plain, "")
+            for pattern in text_patterns:
+                cleaned = pattern.sub("", cleaned)
+            if cleaned == text:
+                continue
+            part.set_content(cleaned, subtype="plain", charset=charset, cte="quoted-printable")
+
+
 def _remove_analytics_quote_header(msg) -> None:
     """Remove Gmail 'On …, no-reply.analytics@wolt.com wrote:' reply header."""
     email_pattern = re.escape(EXCLUDED_RECIPIENT)
@@ -403,6 +481,8 @@ def _prepare_outbound_message(
     on_behalf_name: str = ON_BEHALF_NAME,
     on_behalf_email: str = ON_BEHALF_EMAIL,
     add_signature: bool = True,
+    vacation_html: str = "",
+    vacation_plain: str = "",
 ) -> bytes:
     msg = message_from_bytes(raw_message, policy=email_policy)
     for header in (
@@ -437,6 +517,7 @@ def _prepare_outbound_message(
             msg[header] = ", ".join(formataddr(pair) for pair in filtered)
 
     _fix_gmail_inline_images(msg)
+    _remove_vacation_reply(msg, vacation_html, vacation_plain)
     _remove_analytics_quote_header(msg)
     _remove_looker_unsubscribe(msg, on_behalf_email)
     if add_signature:
@@ -537,6 +618,8 @@ def send_draft_by_id(
     dry_run: bool = False,
     on_behalf_name: str = ON_BEHALF_NAME,
     on_behalf_email: str = ON_BEHALF_EMAIL,
+    vacation_html: str = "",
+    vacation_plain: str = "",
 ) -> dict[str, str]:
     original_raw = _extract_raw_message(service, draft_id)
     prepared = _prepare_outbound_message(
@@ -544,6 +627,8 @@ def send_draft_by_id(
         exclude_email,
         on_behalf_name=on_behalf_name,
         on_behalf_email=on_behalf_email,
+        vacation_html=vacation_html,
+        vacation_plain=vacation_plain,
     )
 
     if not _has_recipients(prepared):
@@ -584,6 +669,7 @@ def send_all_drafts(
     subject_contains: str | None = DRAFT_SUBJECT_CONTAINS,
 ) -> list[dict[str, str]]:
     service = get_gmail_service()
+    vacation_html, vacation_plain = _fetch_vacation_bodies(service)
     drafts = list_all_drafts(service)
     results: list[dict[str, str]] = []
 
@@ -600,6 +686,8 @@ def send_all_drafts(
                 dry_run=dry_run,
                 on_behalf_name=on_behalf_name,
                 on_behalf_email=on_behalf_email,
+                vacation_html=vacation_html,
+                vacation_plain=vacation_plain,
             )
             outcome["subject"] = subject
             results.append(outcome)
